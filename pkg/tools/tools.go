@@ -19,6 +19,7 @@ import (
 	"github.com/GoogleCloudPlatform/gke-mcp/pkg/tools/cluster"
 	cluster_toolkit "github.com/GoogleCloudPlatform/gke-mcp/pkg/tools/cluster-toolkit"
 	"github.com/GoogleCloudPlatform/gke-mcp/pkg/tools/giq"
+	"github.com/GoogleCloudPlatform/gke-mcp/pkg/tools/logging"
 	"github.com/GoogleCloudPlatform/gke-mcp/pkg/tools/recommendation"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -28,5 +29,6 @@ func Install(s *server.MCPServer, c *config.Config) {
 	cluster_toolkit.Install(s, c)
 	// cost.Install(s, c)
 	giq.Install(s, c)
+	logging.Install(s, c)
 	recommendation.Install(s, c)
 }

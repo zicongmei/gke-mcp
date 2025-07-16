@@ -6,6 +6,7 @@ toolchain go1.24.5
 
 require (
 	cloud.google.com/go/container v1.43.0
+	cloud.google.com/go/logging v1.13.0
 	cloud.google.com/go/recommender v1.13.5
 	github.com/mark3labs/mcp-go v0.32.0
 	github.com/spf13/cobra v1.9.1
@@ -14,9 +15,11 @@ require (
 )
 
 require (
+	cloud.google.com/go v0.121.1 // indirect
 	cloud.google.com/go/auth v0.16.1 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.6.0 // indirect
+	cloud.google.com/go/longrunning v0.6.7 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
