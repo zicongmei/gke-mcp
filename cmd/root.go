@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime/debug"
 
 	"github.com/GoogleCloudPlatform/gke-mcp/pkg/config"
 	"github.com/GoogleCloudPlatform/gke-mcp/pkg/install"
@@ -26,11 +27,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const (
-	version = "0.0.1"
-)
-
 var (
+	version = "(unknown)"
+
 	// rootCmd represents the base command when called without any subcommands
 	rootCmd = &cobra.Command{
 		Use:   "gke-mcp",
@@ -62,6 +61,12 @@ func Execute() {
 }
 
 func init() {
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		version = bi.Main.Version
+	} else {
+		log.Printf("Failed to read build info to get version.")
+	}
+
 	rootCmd.AddCommand(installCmd)
 	installCmd.AddCommand(installGeminiCLICmd)
 	installCmd.PersistentFlags().BoolVarP(&installDeveloper, "developer", "d", false, "Install the MCP Server in developer mode")
