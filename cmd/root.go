@@ -28,9 +28,14 @@ import (
 	"github.com/GoogleCloudPlatform/gke-mcp/pkg/config"
 	"github.com/GoogleCloudPlatform/gke-mcp/pkg/install"
 	"github.com/GoogleCloudPlatform/gke-mcp/pkg/tools"
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
 	"google.golang.org/api/option"
+)
+
+const (
+	geminiInstructionsURI = "mcp://gke/pkg/install/GEMINI.md"
 )
 
 var (
@@ -113,8 +118,26 @@ func startMCPServer(ctx context.Context, opts startOptions) {
 		"GKE MCP Server",
 		version,
 		server.WithToolCapabilities(true),
+		server.WithResourceCapabilities(false, false),
 		server.WithInstructions(instructions),
 	)
+
+	resource := mcp.NewResource(
+		geminiInstructionsURI,
+		"GEMINI.md",
+		mcp.WithResourceDescription("Instructions for how to use the GKE MCP server"),
+		mcp.WithMIMEType("text/markdown"),
+	)
+
+	s.AddResource(resource, func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+		return []mcp.ResourceContents{
+			mcp.TextResourceContents{
+				URI:      geminiInstructionsURI,
+				MIMEType: "text/markdown",
+				Text:     string(install.GeminiMarkdown),
+			},
+		}, nil
+	})
 
 	if err := tools.Install(ctx, s, c); err != nil {
 		log.Fatalf("Failed to install tools: %v\n", err)
