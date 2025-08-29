@@ -122,6 +122,21 @@ The user should be made aware that token costs from GIQ are estimated equivalent
 - **To get cost estimates for a specific configuration:** use the gcloud container ai profiles list command. You can also put in cost targets to filter based on price per output token and price per input token.
 - **To generate an optimized Kubernetes deployment manifest:** Use gcloud container ai profiles manifests create with your desired model and performance requirements.
 - **To list your available GKE clusters:** Use gcloud container clusters list.
+- **To get the cheapest models available:** use the gcloud container ai profiles list command with no input to compare all the costs for each model.
+- **To change the default input:output cost ratio:**
+  The gcloud container ai profiles list and gcloud container ai profiles benchmarks list commands calculate costs based on a default 1:4 input-to-output token ratio. The formula is:
+
+  $/output_token = accelerator_per_second_cost / (0.25 * input_tokens/s + output_tokens/s)
+  $/input_token = $/output_token / 4
+
+  The cost per token depends on:
+  1. The accelerator's hourly cost.
+  2. Input token processing speed (input tokens/s).
+  3. Output token processing speed (output tokens/s).
+
+  The gcloud command provides the final costs and output tokens/s, but not the accelerator's hourly cost or the input token speed. This means you cannot directly recalculate costs for a different ratio (e.g., 2:1).
+
+  As a workaround, you can work backwards. The total machine cost for a canonical workload (e.g., one million input and one million output tokens) is constant. You can re-attribute this total cost between input and output tokens according to your desired ratio.
 
 **Examples**
 
