@@ -12,18 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package tools
+package prompts
 
 import (
 	"context"
 
 	"github.com/GoogleCloudPlatform/gke-mcp/pkg/config"
-	"github.com/GoogleCloudPlatform/gke-mcp/pkg/tools/cluster"
-	"github.com/GoogleCloudPlatform/gke-mcp/pkg/tools/clustertoolkit"
-	"github.com/GoogleCloudPlatform/gke-mcp/pkg/tools/giq"
-	"github.com/GoogleCloudPlatform/gke-mcp/pkg/tools/logging"
-	"github.com/GoogleCloudPlatform/gke-mcp/pkg/tools/monitoring"
-	"github.com/GoogleCloudPlatform/gke-mcp/pkg/tools/recommendation"
+	"github.com/GoogleCloudPlatform/gke-mcp/pkg/prompts/cost"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -31,12 +26,7 @@ type installer func(ctx context.Context, s *mcp.Server, c *config.Config) error
 
 func Install(ctx context.Context, s *mcp.Server, c *config.Config) error {
 	installers := []installer{
-		cluster.Install,
-		clustertoolkit.Install,
-		giq.Install,
-		logging.Install,
-		monitoring.Install,
-		recommendation.Install,
+		cost.Install,
 	}
 
 	for _, installer := range installers {

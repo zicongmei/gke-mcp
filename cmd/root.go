@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"runtime/debug"
 	"strings"
@@ -27,10 +28,9 @@ import (
 	"cloud.google.com/go/container/apiv1/containerpb"
 	"github.com/GoogleCloudPlatform/gke-mcp/pkg/config"
 	"github.com/GoogleCloudPlatform/gke-mcp/pkg/install"
-	"github.com/GoogleCloudPlatform/gke-mcp/pkg/prompts/cost"
+	"github.com/GoogleCloudPlatform/gke-mcp/pkg/prompts"
 	"github.com/GoogleCloudPlatform/gke-mcp/pkg/tools"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 	"google.golang.org/api/option"
 )
@@ -134,32 +134,40 @@ func startMCPServer(ctx context.Context, opts startOptions) {
 		}
 	}
 
-	s := server.NewMCPServer(
-		"GKE MCP Server",
-		version,
-		server.WithToolCapabilities(true),
-		server.WithResourceCapabilities(false, false),
-		server.WithInstructions(instructions),
+	s := mcp.NewServer(
+		&mcp.Implementation{
+			Name:    "GKE MCP Server",
+			Version: version,
+		},
+		&mcp.ServerOptions{
+			Instructions: instructions,
+			HasTools:     true,
+			HasResources: true,
+		},
 	)
 
-	resource := mcp.NewResource(
-		geminiInstructionsURI,
-		"GEMINI.md",
-		mcp.WithResourceDescription("Instructions for how to use the GKE MCP server"),
-		mcp.WithMIMEType("text/markdown"),
-	)
+	resource := &mcp.Resource{
+		URI:         geminiInstructionsURI,
+		Name:        "GEMINI.md",
+		Description: "Instructions for how to use the GKE MCP server",
+		MIMEType:    "text/markdown",
+	}
 
-	s.AddResource(resource, func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-		return []mcp.ResourceContents{
-			mcp.TextResourceContents{
-				URI:      geminiInstructionsURI,
-				MIMEType: "text/markdown",
-				Text:     string(install.GeminiMarkdown),
+	s.AddResource(resource, func(_ context.Context, _ *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		return &mcp.ReadResourceResult{
+			Contents: []*mcp.ResourceContents{
+				&mcp.ResourceContents{
+					URI:      geminiInstructionsURI,
+					MIMEType: "text/markdown",
+					Text:     string(install.GeminiMarkdown),
+				},
 			},
 		}, nil
 	})
 
-	s.AddPrompt(cost.GkeCostPrompt, cost.GkeCostHandler)
+	if err := prompts.Install(ctx, s, c); err != nil {
+		log.Fatalf("Failed to install prompts: %v\n", err)
+	}
 
 	if err := tools.Install(ctx, s, c); err != nil {
 		log.Fatalf("Failed to install tools: %v\n", err)
@@ -172,14 +180,18 @@ func startMCPServer(ctx context.Context, opts startOptions) {
 
 	switch opts.serverMode {
 	case "stdio":
-		err = server.ServeStdio(s)
+		tr := &mcp.LoggingTransport{Transport: &mcp.StdioTransport{}, Writer: log.Writer()}
+		err = s.Run(ctx, tr)
 	case "http":
-		httpServer := server.NewStreamableHTTPServer(s)
+		handler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
+			return s
+		}, nil)
 		log.Printf("Listening for HTTP connections on port: %d", opts.serverPort)
-		err = httpServer.Start(endpoint)
+		err = http.ListenAndServe(endpoint, handler)
 	default:
 		log.Printf("Unknown mode '%s', defaulting to 'stdio'", opts.serverMode)
-		err = server.ServeStdio(s)
+		tr := &mcp.LoggingTransport{Transport: &mcp.StdioTransport{}, Writer: log.Writer()}
+		err = s.Run(ctx, tr)
 	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
