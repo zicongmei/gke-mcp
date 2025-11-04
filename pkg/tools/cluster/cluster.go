@@ -97,9 +97,8 @@ func Install(ctx context.Context, s *mcp.Server, c *config.Config) error {
 		},
 	}, h.getKubeconfig)
 
-	// Corrected: Register get_nodes with h.getNodes
 	mcp.AddTool(s, &mcp.Tool{
-		Name:        "get_nodes",
+		Name:        "get_cluster_nodes",
 		Description: "Get the nodes for a GKE cluster. It will connect to the cluster using the kubeconfig in ~/.kube/config.",
 		Annotations: &mcp.ToolAnnotations{
 			ReadOnlyHint: true,
