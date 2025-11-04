@@ -17,6 +17,7 @@ package cluster
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -26,6 +27,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/api/option"
 	"google.golang.org/protobuf/encoding/protojson"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	k8sClientApi "k8s.io/client-go/tools/clientcmd/api"
 )
@@ -52,6 +55,11 @@ type getKubeconfigArgs struct {
 	Location  string `json:"location" jsonschema:"GKE cluster location. Leave this empty if the user doesn't provide it."`
 	Name      string `json:"name" jsonschema:"GKE cluster name. Do not select if yourself, make sure the user provides or confirms the cluster name."`
 }
+
+// getNodesArgs defines arguments for getting nodes from the current default kubeconfig.
+// No arguments are needed as it connects to the cluster defined by the current context
+// in the default kubeconfig.
+type getNodesArgs struct{}
 
 func Install(ctx context.Context, s *mcp.Server, c *config.Config) error {
 
@@ -88,6 +96,15 @@ func Install(ctx context.Context, s *mcp.Server, c *config.Config) error {
 			// ReadOnlyHint is removed because this tool now performs a write operation.
 		},
 	}, h.getKubeconfig)
+
+	// Corrected: Register get_nodes with h.getNodes
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "get_nodes",
+		Description: "Get the nodes for a GKE cluster. It will connect to the cluster using the kubeconfig in ~/.kube/config.",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint: true,
+		},
+	}, h.getNodes)
 
 	return nil
 }
@@ -227,6 +244,52 @@ func (h *handlers) getKubeconfig(ctx context.Context, _ *mcp.CallToolRequest, ar
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			&mcp.TextContent{Text: fmt.Sprintf("Kubeconfig for cluster %s (Project: %s, Location: %s) successfully appended/updated in %s. Current context set to %s.", args.Name, args.ProjectID, args.Location, pathOptions.GlobalFile, newClusterName)},
+		},
+	}, nil, nil
+}
+
+// getNodes retrieves GKE nodes from the cluster defined by the current default kubeconfig.
+func (h *handlers) getNodes(ctx context.Context, _ *mcp.CallToolRequest, args *getNodesArgs) (*mcp.CallToolResult, any, error) {
+	// Build config from default kubeconfig
+	// This will respect KUBECONFIG env var and default to ~/.kube/config
+	// Always reload the kubeconfig because other tools may connect to different GKE clusters.
+	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		clientcmd.NewDefaultClientConfigLoadingRules(),
+		&clientcmd.ConfigOverrides{},
+	).ClientConfig()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to build kubernetes config from default kubeconfig: %w", err)
+	}
+
+	// Create the Kubernetes clientset
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create Kubernetes clientset: %w", err)
+	}
+
+	// List nodes
+	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	if len(nodes.Items) == 0 {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: "No nodes found in the current cluster."},
+			},
+		}, nil, nil
+	}
+
+	// Format nodes for the response
+	nodeByte, err := json.Marshal(nodes.Items)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to marshal nodes: %w", err)
+	}
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: fmt.Sprintf("Found following nodes in the current cluster: %s", string(nodeByte))},
 		},
 	}, nil, nil
 }
