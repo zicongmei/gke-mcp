@@ -103,7 +103,7 @@ func Install(ctx context.Context, s *mcp.Server, c *config.Config) error {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "get_node_sos_report",
-		Description: "Generate and download an SOS report from a GKE node by deploying a privileged debug pod. This tool requires 'kubectl' to be installed and 'gke-gcloud-auth-plugin' to be available.",
+		Description: "Generate and download an SOS report from a GKE node. It attempts to deploy a privileged debug pod first, and falls back to SSH if that fails. Requires 'kubectl', 'gcloud', and 'gke-gcloud-auth-plugin' to be available.",
 	}, h.getNodeSosReport)
 
 	return nil
@@ -263,6 +263,17 @@ func (h *handlers) getNodeSosReport(ctx context.Context, _ *mcp.CallToolRequest,
 		return nil, nil, fmt.Errorf("failed to create destination directory %s: %w", args.Destination, err)
 	}
 
+	// 1. Try Pod-based approach
+	res, _, err := h.getNodeSosReportWithPod(ctx, args)
+	if err == nil {
+		return res, nil, nil
+	}
+
+	// 2. Fallback to SSH approach
+	return h.getNodeSosReportWithSSH(ctx, args)
+}
+
+func (h *handlers) getNodeSosReportWithPod(ctx context.Context, args *getNodeSosReportArgs) (*mcp.CallToolResult, any, error) {
 	// 1. Prepare and run debug pod
 	podName := fmt.Sprintf("sos-debug-%d", time.Now().Unix())
 	overrides := map[string]interface{}{
@@ -377,6 +388,64 @@ func (h *handlers) getNodeSosReport(ctx context.Context, _ *mcp.CallToolRequest,
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			&mcp.TextContent{Text: fmt.Sprintf("SOS report successfully generated and downloaded to: %s", localPath)},
+		},
+	}, nil, nil
+}
+
+func (h *handlers) getNodeSosReportWithSSH(ctx context.Context, args *getNodeSosReportArgs) (*mcp.CallToolResult, any, error) {
+	// 1. Find the zone of the VM
+	// gcloud compute instances list --filter="name=NODE_NAME" --format="value(zone)"
+	findZoneCmd := exec.CommandContext(ctx, "gcloud", "compute", "instances", "list", fmt.Sprintf("--filter=name=%s", args.Node), "--format=value(zone)")
+	zoneOut, err := findZoneCmd.Output()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to find zone for node %s using gcloud: %w", args.Node, err)
+	}
+	zone := strings.TrimSpace(string(zoneOut))
+	if zone == "" {
+		return nil, nil, fmt.Errorf("could not find zone for node %s", args.Node)
+	}
+
+	// 2. Generate SOS report via SSH
+	// gcloud compute ssh --zone "ZONE" "NODE_NAME" --command "sudo sos report --all-logs --batch --tmp-dir=/var"
+	sshCmd := exec.CommandContext(ctx, "gcloud", "compute", "ssh", "--zone", zone, args.Node, "--command", "sudo sos report --all-logs --batch --tmp-dir=/var")
+	outBytes, err := sshCmd.CombinedOutput()
+	output := string(outBytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate sos report via ssh: %s, %w", output, err)
+	}
+
+	// 3. Parse output for filename
+	// Matches /var/sosreport-.*.tar.xz
+	re := regexp.MustCompile(`/var/sosreport-[^\s]+\.tar\.xz`)
+	match := re.FindString(output)
+	if match == "" {
+		return nil, nil, fmt.Errorf("could not find sos report filename in ssh output: %s", output)
+	}
+	remotePath := match
+
+	// 4. Change ownership of the file
+	// gcloud compute ssh ... --command "sudo chown $USER REMOTE_PATH"
+	chownCmd := exec.CommandContext(ctx, "gcloud", "compute", "ssh", "--zone", zone, args.Node, "--command", fmt.Sprintf("sudo chown $USER %s", remotePath))
+	if out, err := chownCmd.CombinedOutput(); err != nil {
+		return nil, nil, fmt.Errorf("failed to chown remote file: %s, %w", string(out), err)
+	}
+
+	// 5. SCP the file
+	// gcloud compute scp --zone "ZONE" "NODE_NAME:REMOTE_PATH" LOCAL_DESTINATION
+	localFilename := filepath.Base(remotePath)
+	localPath := filepath.Join(args.Destination, localFilename)
+	scpCmd := exec.CommandContext(ctx, "gcloud", "compute", "scp", "--zone", zone, fmt.Sprintf("%s:%s", args.Node, remotePath), localPath)
+	if out, err := scpCmd.CombinedOutput(); err != nil {
+		return nil, nil, fmt.Errorf("failed to scp file: %s, %w", string(out), err)
+	}
+
+	// 6. Cleanup remote files on host
+	rmCmd := exec.CommandContext(ctx, "gcloud", "compute", "ssh", "--zone", zone, args.Node, "--command", fmt.Sprintf("sudo rm %s", remotePath))
+	rmCmd.Run()
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: fmt.Sprintf("SOS report successfully generated (via SSH) and downloaded to: %s", localPath)},
 		},
 	}, nil, nil
 }
