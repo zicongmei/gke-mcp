@@ -381,7 +381,7 @@ func (h *handlers) getNodeSosReportWithPod(ctx context.Context, args *getNodeSos
 
 	// The file path inside the pod is /host + path_on_host
 	remotePath := "/host" + match
-	localFilename := filepath.Base(match)
+	localFilename := fmt.Sprintf("sosreport-%s-%s.tar.xz", args.Node, time.Now().Format("2006-01-02-15-04-05"))
 	localPath := filepath.Join(args.Destination, localFilename)
 
 	// 5. Copy the file from the pod to local current directory
@@ -454,7 +454,7 @@ func (h *handlers) getNodeSosReportWithSSH(ctx context.Context, args *getNodeSos
 
 	// 5. SCP the file
 	// gcloud compute scp --zone "ZONE" "NODE_NAME:REMOTE_PATH" LOCAL_DESTINATION
-	localFilename := filepath.Base(remotePath)
+	localFilename := fmt.Sprintf("sosreport-%s-%s.tar.xz", args.Node, time.Now().Format("2006-01-02-15-04-05"))
 	localPath := filepath.Join(args.Destination, localFilename)
 	scpCmd := exec.CommandContext(ctx, "gcloud", "compute", "scp", "--zone", zone, fmt.Sprintf("%s:%s", args.Node, remotePath), localPath)
 	if out, err := scpCmd.CombinedOutput(); err != nil {
