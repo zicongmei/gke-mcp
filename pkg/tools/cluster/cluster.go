@@ -63,6 +63,7 @@ type getKubeconfigArgs struct {
 type getNodeSosReportArgs struct {
 	Node        string `json:"node" jsonschema:"GKE node name to collect SOS report from."`
 	Destination string `json:"destination,omitempty" jsonschema:"Local directory to download the SOS report to. Defaults to /tmp/sos-report if not specified."`
+	Method      string `json:"method,omitempty" jsonschema:"Method to get sos report. Can be 'pod', 'ssh' or 'both'. Defaults to 'both'. When the node is unhealthy from api server, use ssh only."`
 }
 
 func Install(ctx context.Context, s *mcp.Server, c *config.Config) error {
@@ -103,7 +104,7 @@ func Install(ctx context.Context, s *mcp.Server, c *config.Config) error {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "get_node_sos_report",
-		Description: "Generate and download an SOS report from a GKE node. It attempts to deploy a privileged debug pod first, and falls back to SSH if that fails. Requires 'kubectl', 'gcloud', and 'gke-gcloud-auth-plugin' to be available.",
+		Description: "Generate and download an SOS report from a GKE node. Can use 'pod', 'ssh' or 'both' methods. Defaults to 'both' (pod with fallback to ssh). Use 'ssh' if node is API-unhealthy.",
 	}, h.getNodeSosReport)
 
 	return nil
@@ -258,18 +259,39 @@ func (h *handlers) getNodeSosReport(ctx context.Context, _ *mcp.CallToolRequest,
 	if args.Destination == "" {
 		args.Destination = "/tmp/sos-report"
 	}
+	if args.Method == "" {
+		args.Method = "both"
+	}
+
+	// Check if node is healthy
+	isHealthy := false
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "node", args.Node, "-o", "jsonpath='{.status.conditions[?(@.type==\"Ready\")].status}'")
+	out, err := cmd.Output()
+	if err == nil && strings.Contains(string(out), "True") {
+		isHealthy = true
+	}
+
+	if !isHealthy {
+		args.Method = "ssh"
+	}
 
 	if err := os.MkdirAll(args.Destination, 0755); err != nil {
 		return nil, nil, fmt.Errorf("failed to create destination directory %s: %w", args.Destination, err)
 	}
 
-	// 1. Try Pod-based approach
-	res, _, err := h.getNodeSosReportWithPod(ctx, args)
-	if err == nil {
-		return res, nil, nil
+	if args.Method == "pod" || args.Method == "both" {
+		// 1. Try Pod-based approach
+		res, _, err := h.getNodeSosReportWithPod(ctx, args)
+		if err == nil {
+			return res, nil, nil
+		}
+		if args.Method == "pod" {
+			return nil, nil, fmt.Errorf("failed to get sos report with pod: %w", err)
+		}
+		// If method is both and pod failed, fall through to ssh
 	}
 
-	// 2. Fallback to SSH approach
+	// 2. Fallback or direct SSH approach
 	return h.getNodeSosReportWithSSH(ctx, args)
 }
 
