@@ -372,15 +372,20 @@ func (h *handlers) getNodeSosReportWithPod(ctx context.Context, args *getNodeSos
 
 	// 4. Parse the output to find the filename
 	// The output usually contains: "Your sosreport has been generated and saved in: /path/to/file.tar.xz"
-	// Since we are chrooted, the path reported is relative to the host root (e.g., /tmp/sos-.../file.tar.xz)
-	re := regexp.MustCompile(regexp.QuoteMeta(remoteTmpDir) + `/[^\s]+\.tar\.xz`)
+	// The path might be reported as /host/tmp/... or /tmp/... depending on how sos report was invoked.
+	// We also handle both .tar.xz and .tar.gz extensions.
+	re := regexp.MustCompile(`(/host)?` + regexp.QuoteMeta(remoteTmpDir) + `/[^\s]+\.tar\.(xz|gz)`)
 	match := re.FindString(output)
 	if match == "" {
 		return nil, nil, fmt.Errorf("could not find sos report filename in output: %s", output)
 	}
 
-	// The file path inside the pod is /host + path_on_host
-	remotePath := "/host" + match
+	// The file path inside the pod is what we need for 'cat'.
+	// If the match didn't start with /host, we prepend it because we mounted host root at /host.
+	remotePath := match
+	if !strings.HasPrefix(remotePath, "/host") {
+		remotePath = "/host" + remotePath
+	}
 	localFilename := fmt.Sprintf("sosreport-%s-%s.tar.xz", args.Node, time.Now().Format("2006-01-02-15-04-05"))
 	localPath := filepath.Join(args.Destination, localFilename)
 
