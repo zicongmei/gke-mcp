@@ -63,7 +63,7 @@ type getKubeconfigArgs struct {
 type getNodeSosReportArgs struct {
 	Node        string `json:"node" jsonschema:"GKE node name to collect SOS report from."`
 	Destination string `json:"destination,omitempty" jsonschema:"Local directory to download the SOS report to. Defaults to /tmp/sos-report if not specified."`
-	Method      string `json:"method,omitempty" jsonschema:"Method to get sos report. Can be 'pod', 'ssh' or 'both'. Defaults to 'both'. When the node is unhealthy from api server, use ssh only."`
+	Method      string `json:"method,omitempty" jsonschema:"Method to get sos report. Can be 'pod', 'ssh' or 'any'. Defaults to 'any'. When the node is unhealthy from api server, use ssh only."`
 }
 
 func Install(ctx context.Context, s *mcp.Server, c *config.Config) error {
@@ -104,7 +104,7 @@ func Install(ctx context.Context, s *mcp.Server, c *config.Config) error {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "get_node_sos_report",
-		Description: "Generate and download an SOS report from a GKE node. Can use 'pod', 'ssh' or 'both' methods. Defaults to 'both' (pod with fallback to ssh). Use 'ssh' if node is API-unhealthy.",
+		Description: "Generate and download an SOS report from a GKE node. Can use 'pod', 'ssh' or 'any' methods. Defaults to 'any' (pod with fallback to ssh). Use 'ssh' if node is API-unhealthy.",
 	}, h.getNodeSosReport)
 
 	return nil
@@ -260,7 +260,7 @@ func (h *handlers) getNodeSosReport(ctx context.Context, _ *mcp.CallToolRequest,
 		args.Destination = "/tmp/sos-report"
 	}
 	if args.Method == "" {
-		args.Method = "both"
+		args.Method = "any"
 	}
 
 	// Check if node is healthy
@@ -279,7 +279,7 @@ func (h *handlers) getNodeSosReport(ctx context.Context, _ *mcp.CallToolRequest,
 		return nil, nil, fmt.Errorf("failed to create destination directory %s: %w", args.Destination, err)
 	}
 
-	if args.Method == "pod" || args.Method == "both" {
+	if args.Method == "pod" || args.Method == "any" {
 		// 1. Try Pod-based approach
 		res, _, err := h.getNodeSosReportWithPod(ctx, args)
 		if err == nil {
