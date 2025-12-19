@@ -61,9 +61,10 @@ type getKubeconfigArgs struct {
 }
 
 type getNodeSosReportArgs struct {
-	Node        string `json:"node" jsonschema:"GKE node name to collect SOS report from."`
-	Destination string `json:"destination,omitempty" jsonschema:"Local directory to download the SOS report to. Defaults to /tmp/sos-report if not specified."`
-	Method      string `json:"method,omitempty" jsonschema:"Method to get sos report. Can be 'pod', 'ssh' or 'any'. Defaults to 'any'. When the node is unhealthy from api server, use ssh only."`
+	Node           string `json:"node" jsonschema:"GKE node name to collect SOS report from."`
+	Destination    string `json:"destination,omitempty" jsonschema:"Local directory to download the SOS report to. Defaults to /tmp/sos-report if not specified."`
+	Method         string `json:"method,omitempty" jsonschema:"Method to get sos report. Can be 'pod', 'ssh' or 'any'. Defaults to 'any'. When the node is unhealthy from api server, use ssh only."`
+	TimeoutSeconds int    `json:"timeout,omitempty" jsonschema:"Timeout in seconds for the report collection (applies to both pod and ssh methods). Defaults to 180 (3 minutes)."`
 }
 
 func Install(ctx context.Context, s *mcp.Server, c *config.Config) error {
@@ -262,6 +263,9 @@ func (h *handlers) getNodeSosReport(ctx context.Context, _ *mcp.CallToolRequest,
 	if args.Method == "" {
 		args.Method = "any"
 	}
+	if args.TimeoutSeconds <= 0 {
+		args.TimeoutSeconds = 180 // Default to 3 minutes
+	}
 
 	// Check if node is healthy
 	isHealthy := false
@@ -280,19 +284,24 @@ func (h *handlers) getNodeSosReport(ctx context.Context, _ *mcp.CallToolRequest,
 	}
 
 	if args.Method == "pod" || args.Method == "any" {
-		// 1. Try Pod-based approach
-		res, _, err := h.getNodeSosReportWithPod(ctx, args)
+		// 1. Try Pod-based approach with timeout
+		podCtx, podCancel := context.WithTimeout(ctx, time.Duration(args.TimeoutSeconds)*time.Second)
+		defer podCancel()
+
+		res, _, err := h.getNodeSosReportWithPod(podCtx, args)
 		if err == nil {
 			return res, nil, nil
 		}
 		if args.Method == "pod" {
 			return nil, nil, fmt.Errorf("failed to get sos report with pod: %w", err)
 		}
-		// If method is both and pod failed, fall through to ssh
+		// If method is any and pod failed (e.g. timeout), fall through to ssh
 	}
 
-	// 2. Fallback or direct SSH approach
-	return h.getNodeSosReportWithSSH(ctx, args)
+	// 2. Fallback or direct SSH approach with timeout
+	sshCtx, sshCancel := context.WithTimeout(ctx, time.Duration(args.TimeoutSeconds)*time.Second)
+	defer sshCancel()
+	return h.getNodeSosReportWithSSH(sshCtx, args)
 }
 
 func (h *handlers) getNodeSosReportWithPod(ctx context.Context, args *getNodeSosReportArgs) (*mcp.CallToolResult, any, error) {
